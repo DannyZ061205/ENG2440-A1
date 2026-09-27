@@ -1,0 +1,38 @@
+{
+  "cnn": {
+    "label": "CNN, fine-tuned",
+    "role": "focus"
+  },
+  "cnn_frozen": {
+    "label": "CNN, frozen features",
+    "role": "baseline",
+    "color": "#7FA3B3",
+    "marker": "^",
+    "linestyle": "-."
+  },
+  "logistic": {
+    "label": "Logistic, 15 features",
+    "role": "baseline",
+    "color": "#16425B",
+    "marker": "s",
+    "linestyle": "--"
+  },
+  "cnn_plain": {
+    "label": "CNN, fine-tuned, plain BCE",
+    "role": "baseline",
+    "color": "#4D4D4D",
+    "marker": "D",
+    "linestyle": ":"
+  },
+  "cnn_platt": {
+    "label": "CNN, fine-tuned + Platt",
+    "role": "baseline",
+    "color": "#8C1C13",
+    "marker": "v",
+    "linestyle": "-"
+  },
+  "trivial": {
+    "label": "Trivial (majority class)",
+    "role": "reference"
+  }
+}

@@ -1,0 +1,142 @@
+% Figure includes generated from the notebook captions.
+% Every figure was drawn at 6.30 in wide; include it at that width (or a fraction of it) so text sizes stay as drawn.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/A2_dataset_overview.pdf}
+  \caption{\textbf{Only 22\% of exams are positive, and 38\% of patients have more than one exam.} (a) Exams per label. (b) Exams per patient on a log scale; red bars are patients with two or more exams.}
+  \label{fig:A2_dataset_overview}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/A4_acquisition_metadata.pdf}
+  \caption{\textbf{AP images are four times as often positive as PA images (37.5\% vs 9.0\%), while sex and age differ little between the classes..} }
+  \label{fig:A4_acquisition_metadata}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/A3_representative_images.pdf}
+  \caption{\textbf{Eight exams chosen by the rules above.} Gold rectangles are the annotated opacities; the inset zooms in on the smallest one.}
+  \label{fig:A3_representative_images}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/B4_splits.pdf}
+  \caption{\textbf{Every split has a positive share between 21.6\% and 22.8\%..} }
+  \label{fig:B4_splits}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/C2_augmentation_panel.pdf}
+  \caption{\textbf{Three random augmentations of two positive training images, with the sampled rotation, scale and shift under each..} }
+  \label{fig:C2_augmentation_panel}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/D2_logistic_baseline.pdf}
+  \caption{\textbf{(a) Weight decay up to 0.01 hardly matters and larger values underfit.} (b) The learned weights; p25 and p50 get large opposite weights because they are strongly correlated (r = 0.851).}
+  \label{fig:D2_logistic_baseline}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/E2_lr_selection.pdf}
+  \caption{\textbf{All three learning rates reach about the same best validation AUROC (0.855--0.858), but only 1e-4 overfits afterwards.} The rule picks 1e-4 by a tiny margin, so 3e-5 would have been just as good.}
+  \label{fig:E2_lr_selection}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/E4_learning_curves.pdf}
+  \caption{\textbf{Fine-tuning raises validation AUROC from 0.83 to about 0.86 within one to three epochs.} After that the training loss keeps falling while the validation loss rises, which is overfitting. Lines are means over three seeds with $\pm$1 SD bands; dots mark the epoch kept for each seed.}
+  \label{fig:E4_learning_curves}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/C4_imbalance_effect.pdf}
+  \caption{\textbf{The weighted loss raises sensitivity at t = 0.5 from 0.562 to 0.822 but leaves AUROC unchanged (0.861 for both).} (a) Validation metrics, mean $\pm$ SD over three seeds. (b) Predicted probabilities for seed 0.}
+  \label{fig:C4_imbalance_effect}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/F1_confusion_matrices.pdf}
+  \caption{\textbf{At the screening threshold the CNN finds 727 of 815 positive test exams but raises 1,059 false alarms.} The high-specificity threshold does the opposite (116 false alarms, 519 missed). Seed 2; the shade shows the share of the true-label row.}
+  \label{fig:F1_confusion_matrices}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/F3_roc_pr_curves.pdf}
+  \caption{\textbf{The fine-tuned CNN is above the logistic baseline everywhere (test AUROC 0.857 vs 0.689 and AUPRC 0.655 vs 0.335, means over three seeds).} Bold lines are seed 2 and thin red lines the other seeds; the circle and square mark the two thresholds; dotted is the trivial model.}
+  \label{fig:F3_roc_pr_curves}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/F5_reliability.pdf}
+  \caption{\textbf{The weighted CNN over-predicts (ECE 0.195).} Platt scaling fitted on validation fixes this (ECE 0.011) without changing AUROC (0.862). Hollow markers are bins with fewer than 30 exams; the strips below show how many exams fall in each bin.}
+  \label{fig:F5_reliability}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/G1_error_examples.pdf}
+  \caption{\textbf{The worst mistakes are made with high confidence: a false positive at p = 0.99 and a missed opacity at p = 0.01.} The false positive has hazy lungs on both sides, so its label may be debatable. Gold rectangles are the annotated opacities.}
+  \label{fig:G1_error_examples}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/G2_subgroups.pdf}
+  \caption{\textbf{AUROC within PA images (0.824) and within AP images (0.815) is lower than overall (0.862).} Bars are 95\% bootstrap intervals; the right side lists group sizes and sensitivity/specificity.}
+  \label{fig:G2_subgroups}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/G3_gradcam.pdf}
+  \caption{\textbf{On true positives the heat overlaps the annotated boxes but also spreads over the heart.} On correct negatives the maps are much weaker (raw peak 0.01--0.03 vs 0.16--0.31). Error columns are titled in red, and each map is scaled to its own peak.}
+  \label{fig:G3_gradcam}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/G4_gradcam_summary.pdf}
+  \caption{\textbf{On positive exams the heat concentrates on the annotated opacities (ratio above 1 for 76\% of them), while negative exams have much weaker maps.} (a, b) Average maps of positives and negatives on one colour scale. (c) Heat share in the boxes divided by their area share; 82 positives (10\%) have almost no heat in their boxes.}
+  \label{fig:G4_gradcam_summary}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/X1_prevalence_shift.pdf}
+  \caption{\textbf{Going from 40\% to 10\% prevalence leaves sensitivity, specificity and AUROC unchanged but cuts PPV from 0.62 to 0.22 and F1 from 0.73 to 0.35.} The dotted curves are what Bayes' rule predicts from the original sensitivity and specificity; the hollow point is an example at 5\% prevalence.}
+  \label{fig:X1_prevalence_shift}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/X2_masks.pdf}
+  \caption{\textbf{The border mask and the lung control hide the same share of the image (29.6\%).} (a) Where the training opacities are, which positions the control. (b) Border mask. (c) Lung control.}
+  \label{fig:X2_masks}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/X2_delta_p.pdf}
+  \caption{\textbf{Hiding the lungs changes the predictions about five times more than hiding the border (median $|$$\Delta$p$|$ 0.237 vs 0.045)..} }
+  \label{fig:X2_delta_p}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=6.3in]{figures/X2_gradcam_top3.pdf}
+  \caption{\textbf{The three largest border changes are all increases of about 0.5 (+0.476 to +0.535), two of them on negative exams.} After masking, the heat moves to the centre of the chest rather than onto the grey frame, so the unnatural frame seems to change how the model reads the whole image.}
+  \label{fig:X2_gradcam_top3}
+\end{figure}

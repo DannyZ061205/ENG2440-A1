@@ -1,0 +1,34 @@
+# --- Never commit the dataset or anything derived from patient images ---
+data/
+*.dcm
+*.zip
+assignment1_labels.csv
+rsna_to_nih_mapping.csv
+# rendered figures contain radiographs; only the plan/registry/report files are tracked
+figures/*
+!figures/methods.json
+!figures/FIGURE_PLAN.md
+!figures/FIGURE_REPORT.md
+!figures/latex_includes.tex
+outputs/
+# the compiled report embeds radiographs: only its LaTeX source is tracked
+report/*
+!report/main.tex
+
+# --- Environment / tooling ---
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+.build/
+
+# --- Personal notes not part of the submission ---
+HPC_COMPUTE.md
+
+# layout-preview copy of the notebook (phantom images)
+_preview.ipynb
+
+# personal study page (embeds figures with radiographs; never committed)
+study/
+.claude/

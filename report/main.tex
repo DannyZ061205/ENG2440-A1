@@ -1,0 +1,391 @@
+% ENG 2440 Assignment 1 report. Build: tectonic main.tex  (figures are read from ../figures/)
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2cm]{geometry}            % figures are placed at their drawn width (6.30 in), not scaled
+\usepackage{newtxtext,newtxmath}             % Times, the same typeface as the figures
+\usepackage{graphicx,booktabs,multirow,array,xcolor,microtype}
+\usepackage[font=small,labelfont=bf,skip=3pt]{caption}
+\usepackage[compact]{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{placeins}
+
+\graphicspath{{../figures/}}
+\newcommand{\fig}[2][1]{\includegraphics[width=#1\dimexpr 6.3in\relax]{#2}}   % figure at (a fraction of) its drawn width
+\newcommand{\repourl}{https://github.com/DannyZ061205/ENG2440-A1}
+\setlist{nosep,leftmargin=*}
+\setlength{\emergencystretch}{1.5em}           % lets TeX break lines around unbreakable code names
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{5}   % allow more floats per page
+\renewcommand{\topfraction}{0.9}\renewcommand{\bottomfraction}{0.6}\renewcommand{\textfraction}{0.07}
+\setlength{\textfloatsep}{6pt plus 2pt minus 2pt}
+\setlength{\floatsep}{4pt plus 2pt minus 2pt}
+\setlength{\intextsep}{7pt plus 2pt minus 2pt}
+\titlespacing*{\section}{0pt}{7pt}{2pt}
+\titlespacing*{\subsection}{0pt}{4pt}{1pt}
+\newcommand{\nb}[1]{\textcolor{black!55}{[#1]}}      % pointer to the matching requirement ID in the notebook
+
+\begin{document}
+
+\begin{center}
+{\Large\bfseries Pneumonia Classification Challenge: detecting lung opacity on chest radiographs}\\[3pt]
+Zichen Zhao (25011189) \quad·\quad ENG 2440 Medical Imaging \& AI in Healthcare, Assignment 1\\[1pt]
+\url{\repourl}
+\end{center}
+
+\noindent\textbf{Summary.} We built a PyTorch pipeline that decides whether a frontal chest radiograph from the RSNA
+Pneumonia Detection Challenge shows lung opacity. We split by patient, made every choice on validation data and used the test set once. A fine-tuned ImageNet ResNet-18 (the \emph{headline CNN}) reaches a test area under the receiver
+operating characteristic (ROC) curve (AUROC) of $0.857 \pm 0.004$ (mean $\pm$ SD over three seeds), well above the $0.689$ of
+a logistic model on 15 intensity features. At a screening threshold set for 90\% sensitivity, the seed-2 model finds 89\% of the opacities, but
+only 41\% of its alarms are correct. Its probabilities also need recalibration, and part of its ranking appears to come
+from the image projection rather than from the lungs.
+
+\section{Task and data}
+\textbf{Task.} The model receives one frontal chest radiograph, stored as a $1024\times1024$ 8-bit DICOM file and
+converted to a one-channel $224\times224$ tensor, and returns the probability $p$ that the image shows lung opacity
+consistent with possible pneumonia. A threshold then turns $p$ into a positive or negative call. The clinical question is one of triage, not diagnosis: should this radiograph be read first because a radiologist would probably flag an opacity on it?
+
+\textbf{What the label means.} An examination counts as positive if any of its annotation rows has \texttt{Target}\,=\,1.
+This label has two limitations that affect every result below. First, a negative label does not mean a normal chest. The
+negative class merges the challenge's ``Normal'' and ``No Lung Opacity\,/\,Not Normal'' categories, so it also contains
+effusions, enlarged hearts and devices; the top-left image in Appendix Figure~\ref{fig:examples} is a visibly abnormal
+negative. Second, the label is only a proxy for pneumonia. Radiologists drew the opacity boxes from the image alone
+\cite{shih2019}, without the patient record, laboratory tests or follow-up. Every number in this report therefore measures
+agreement with expert image annotations rather than accuracy for the disease, and because readers disagree, no model can score perfectly.
+
+\textbf{Data.} Despite its name, the label file's \texttt{patientId} is a random code per examination, so we joined it to the RSNA-to-NIH mapping to recover the patient behind each one. This gives 11{,}171 NIH patients with 25{,}684 examinations, of which 20{,}025 (78.0\%) are negative and 5{,}659 (22.0\%) positive. Many patients were imaged more than once (4{,}198, or 37.6\%, have two or more examinations), which matters for the split. The DICOM
+headers show that all images are $1024\times1024$, \texttt{MONOCHROME2} and 8-bit, so no inversion or padding is needed.
+The projection, however, varies and is strongly linked to the label: 37.5\% of the 11{,}705 anterior--posterior (AP)
+examinations, which are mostly taken at the bedside, are positive, compared with 9.0\% of the 13{,}979
+posterior--anterior (PA) ones. Appendix Figure~\ref{fig:examples} shows eight examinations chosen by fixed rules.
+
+\section{Methods}
+\textbf{Leakage-safe splits.} Because so many patients have several examinations, a split by examination would let the
+model see the same person in training and test: with a random split of examinations, 67.2\% of test examinations would
+have had an examination of the same patient in training. We therefore assigned whole patients to the splits, 70\% to
+training, 15\% to validation and 15\% to test, drawing separately among patients with and without a positive examination so
+that the positive share stays similar (split seed 2440). Assertions in the notebook confirm that the three sets of patient
+identifiers are disjoint. The splits hold 7{,}820, 1{,}676 and 1{,}675 patients with 17{,}920, 3{,}987 and 3{,}777
+examinations, of which 22.0\%, 22.8\% and 21.6\% are positive. The test split was used only once, for the final evaluation.
+
+\textbf{Leakage that patient grouping does not prevent.} In a multi-site dataset each hospital has its own scanners,
+burned-in text and pneumonia rate. A patient split places every hospital in both training and test, so a model could learn
+to recognise a high-prevalence site instead of the disease. Three tests would reveal this: whether the pixels predict the site, whether AUROC drops on held-out hospitals, and whether it differs between sites. Our data come from one hospital, so the subgroup analysis studies the closest analogue: the projection, which likewise changes both the image and the positive rate.
+
+\textbf{Preprocessing and augmentation.} Each DICOM file is decoded, divided by 255, resized to $224\times224$ by area
+averaging, cached, and standardised with the mean and SD of the training pixels ($\mu = 0.4902$, $\sigma = 0.2469$).
+During training only, each image is changed at random within ranges that mimic real differences between radiographs: a
+rotation of up to $\pm7^\circ$ for patients who are not straight, a shift of up to $\pm5\%$ for off-centre positioning, a
+scaling of 0.92--1.08 for body size and the magnification of bedside AP images, and brightness and contrast changes of up
+to $\pm10\%$ for exposure (Appendix Figure~\ref{fig:augment}). These changes are too small to push an opacity out of the
+image. We did not flip images horizontally, because a flipped chest puts the heart on the wrong side and mirrors the side
+markers, and we avoided random erasing and aggressive crops, which can remove the only opacity.
+
+\textbf{Class imbalance.} Since only 22\% of training examinations are positive, we weighted the positive term of the
+binary cross-entropy (BCE) loss by $N_\text{neg}/N_\text{pos} = 13{,}986/3{,}934 = 3.555$, so that both classes
+contribute equally to the loss (\emph{weighted BCE}). To measure the effect of this choice, we also trained the CNN
+without the weight (\emph{plain BCE}).
+
+\textbf{Baselines.} Two baselines set the bar the CNN has to clear. The trivial baseline always predicts ``negative''. The
+logistic baseline is a single \texttt{nn.Linear(15, 1)} layer applied to 15 standardised features of each image: the
+mean, the SD, the 5th, 25th, 50th, 75th and 95th intensity percentiles, and the fractions of pixels in 8 equal-width
+intensity bins. It is trained with the same weighted BCE, and its weight decay (0.01) was chosen on the validation set.
+
+\textbf{CNN.} We adapted ResNet-18 \cite{he2016} with torchvision weights pretrained on ImageNet \cite{deng2009}
+(\texttt{IMAGENET1K\_V1}) \cite{paszke2019}. Its first convolution expects three colour channels, so we replaced it with a
+single-channel convolution whose kernel is the sum of the three pretrained RGB kernels. Because convolution is linear, the
+new layer gives exactly the output of the original layer on the grey image copied into three channels, as the notebook
+verifies. The 1{,}000-class output layer was replaced by a new \texttt{nn.Linear(512, 1)} that produces one logit $z$,
+with $p = \sigma(z)$. Stage 1 of training keeps every pretrained weight frozen and trains only this head for 4 epochs
+(AdamW, learning rate $10^{-3}$, batch size 64), so the network acts as a fixed feature extractor. Stage 2 also unfreezes
+the final block, \texttt{layer4} (8.4\,M parameters), for 8 epochs with a cosine-decayed learning rate whose starting value
+of $10^{-4}$ narrowly beat $3\times10^{-5}$ and $10^{-5}$ on validation (AUROC 0.8583 versus 0.8577 and 0.8551, seed 0).
+BatchNorm layers in frozen blocks keep their ImageNet statistics, and each stage keeps its best validation epoch. The
+fine-tuned model trained with weighted BCE is the headline CNN.
+
+\textbf{Seeds and a controlled comparison.} The headline CNN was trained with seeds 0, 1 and 2, which change only the head
+initialisation, the batch order and the augmentation; bootstrap resampling and the prevalence subsampling (X1) use seed 2440. The CNN
+and the logistic baseline share the split, images, loss weighting, validation-based selection, threshold rules and metric
+code, so they differ only in the model and how it is fitted. The 8 training runs (three seeds per loss plus two extra learning rates) took 63 minutes on an Apple-silicon GPU,
+and retraining them from a clean copy of the repository reproduced them bit for bit.
+
+\textbf{Evaluation.} Our primary metric is test AUROC, because it depends on neither a threshold nor the prevalence. We also report the area under the precision--recall curve (AUPRC, estimated by average precision) and the confusion matrix, accuracy, sensitivity, specificity, precision (positive predictive value, PPV) and F1 at two thresholds frozen on each model's validation predictions. The \emph{screening} threshold is the highest one with validation sensitivity of
+at least 0.90, and the \emph{high-specificity} threshold the lowest one with validation specificity of at least 0.95.
+Calibration is measured with 10-bin reliability diagrams, the expected calibration error (ECE) and the Brier score, and
+repaired by Platt scaling \cite{platt1999}, a fit of $p' = \sigma(a z + b)$ on the validation predictions. Single-model
+analyses use seed 2, which had the best validation AUROC and also has the best test AUROC (0.862 against a mean of 0.857).
+Grad-CAM \cite{selvaraju2017} uses \texttt{model.layer4}, the deepest layer that still has a spatial layout ($7\times7$) and the block we fine-tuned.
+
+\section{Results}
+
+\textbf{Training behaviour.} The learning curves (Figure~\ref{fig:curves}) show that the two stages fail in opposite
+ways. With frozen features, the training and validation losses stay close and level off, and the validation AUROC of seed 0
+rises only from 0.817 to 0.832, which suggests underfitting: a linear head on fixed features lacks capacity. Unfreezing
+\texttt{layer4} lifts validation AUROC to about 0.86 within one to three epochs. After that, the mean training loss keeps
+falling (to 0.378 at epoch 12) while the mean validation loss rises (to 0.928), a sign that the model now overfits the training images. Keeping the best validation epoch (epochs 7, 5 and 6 for the three seeds) therefore acts as
+early stopping.
+
+\begin{figure}[t]
+\centering\fig[0.84]{E4_learning_curves.pdf}
+\caption{\textbf{Fine-tuning lifts validation AUROC from 0.83 to about 0.86 within one to three epochs; afterwards the
+training loss keeps falling while the validation loss rises (overfitting).} Headline CNN; lines are means over seeds
+0--2, bands $\pm1$ SD; grey band: stage 1. (b) Dots: the epoch selected for each seed.}
+\label{fig:curves}
+\end{figure}
+
+\textbf{Comparison with the baselines.} The headline CNN is clearly better than both baselines, and the difference is far
+larger than run-to-run noise (Table~\ref{tab:comparison}). Its three seeds reach test AUROCs of 0.854, 0.857 and 0.862,
+while the logistic model reaches 0.689 for every seed because its training problem is convex. The mean gap of 0.169 is 43 times the CNN's seed SD, which measures training noise. For test-sample noise, a paired bootstrap on 2{,}000 test resamples puts the seed-2 CNN's gap over the logistic model at 0.173 (95\% interval 0.155 to 0.191). Smaller effects are less certain: fine-tuning adds 0.026 over frozen features (6.6 seed SDs), but three seeds give only a rough SD, which omits patient-split variation. Weighted and plain BCE give the same AUROC.
+
+\begin{table}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{2.9pt}
+\caption{\textbf{Test-set comparison.} Same test split for every model ($n = 3{,}777$, 21.6\% positive); mean over seeds
+0--2 (SD for AUROC and AUPRC; the SD of every other column is at most 0.035). Thresholds frozen on validation: screening =
+highest $t$ with sensitivity $\geq 0.90$; high specificity = lowest $t$ with specificity $\geq 0.95$. The trivial model
+never predicts positive, so its precision is undefined (--). Bold: headline CNN.}
+\label{tab:comparison}
+\begin{tabular}{lcc@{\hspace{8pt}}ccccc@{\hspace{8pt}}cc}
+\toprule
+& \multicolumn{2}{c}{threshold-free} & \multicolumn{5}{c}{screening threshold} & \multicolumn{2}{c}{high specificity} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-8}\cmidrule(lr){9-10}
+model & AUROC & AUPRC & accuracy & sensitivity & specificity & precision & F1 & sensitivity & precision \\
+\midrule
+trivial (always negative) & 0.500 & 0.216 & 0.784 & 0.000 & 1.000 & -- & 0.000 & 0.000 & -- \\
+logistic, 15 features & 0.689\,{\scriptsize$\pm$0.000} & 0.335\,{\scriptsize$\pm$0.000} & 0.476 & 0.872 & 0.367 & 0.275 & 0.418 & 0.104 & 0.379 \\
+CNN, frozen features & 0.831\,{\scriptsize$\pm$0.001} & 0.576\,{\scriptsize$\pm$0.003} & 0.639 & 0.899 & 0.567 & 0.364 & 0.518 & 0.317 & 0.667 \\
+\textbf{CNN, fine-tuned} & \textbf{0.857}\,{\scriptsize$\pm$0.004} & \textbf{0.655}\,{\scriptsize$\pm$0.006} & \textbf{0.685} & \textbf{0.885} & \textbf{0.631} & \textbf{0.397} & \textbf{0.548} & \textbf{0.369} & \textbf{0.725} \\
+CNN, fine-tuned, plain BCE & 0.857\,{\scriptsize$\pm$0.006} & 0.660\,{\scriptsize$\pm$0.008} & 0.678 & 0.893 & 0.619 & 0.392 & 0.545 & 0.374 & 0.728 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{ROC versus precision--recall.} For this class balance the precision--recall curve is more informative than the
+ROC curve (Figure~\ref{fig:rocpr}). Both ROC axes are rates within one true class, so the ROC curve ignores prevalence.
+Precision instead answers the clinical question ``of the examinations we flag, how many have an opacity?''. Its chance level is the prevalence (0.216), so AUPRC shows how far a model rises above chance on the rare class: 0.655 for the headline CNN, 0.335 for the logistic model. The seed-2 screening point shows why. On the ROC plot, a false-positive rate of 0.36 at sensitivity 0.892 looks acceptable, but negatives outnumber positives, so it means 1{,}059 false alarms against 727 true positives: only 41\% are correct.
+
+\begin{figure}[t]
+\centering\fig[0.9]{F3_roc_pr_curves.pdf}
+\caption{\textbf{The fine-tuned CNN beats the logistic baseline at every operating point.} Test ROC (a) and
+precision--recall (b) curves. Bold: seed 2 (its AUROC and AUPRC in the legend); thin red: the other CNN seeds. Circle and
+square: the screening and high-specificity thresholds frozen on validation. Dotted: trivial classifier.}
+\label{fig:rocpr}
+\end{figure}
+
+\textbf{Operating thresholds.} The two frozen thresholds trade missed opacities against false alarms
+(Table~\ref{tab:thresholds}). The screening threshold finds 727 of the 815 positive test examinations at the cost of
+1{,}059 false alarms, which suits a worklist where flagged examinations are read first. The high-specificity threshold
+raises only 116 false alarms but misses 519 opacities, so it cannot rule out an opacity. Screening sensitivity on test (0.892) falls just short of 0.90 because that threshold was fitted to only 910 validation positives.
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{\textbf{Confusion matrices of the headline CNN (seed 2) at the two thresholds frozen on validation.}
+TP, FP, TN, FN: true positives, false positives, true negatives, false negatives.}
+\label{tab:thresholds}
+\setlength{\tabcolsep}{3.6pt}
+\begin{tabular}{llcrrrrccccc}
+\toprule
+threshold & split & $t$ & TP & FP & TN & FN & accuracy & sensitivity & specificity & precision & F1 \\
+\midrule
+\multirow{2}{*}{screening} & validation & \multirow{2}{*}{0.396} & 819 & 1{,}141 & 1{,}936 & 91 & 0.691 & 0.900 & 0.629 & 0.418 & 0.571 \\
+ & test & & 727 & 1{,}059 & 1{,}903 & 88 & 0.696 & 0.892 & 0.642 & 0.407 & 0.559 \\
+\midrule
+\multirow{2}{*}{high specificity} & validation & \multirow{2}{*}{0.897} & 372 & 153 & 2{,}924 & 538 & 0.827 & 0.409 & 0.950 & 0.709 & 0.518 \\
+ & test & & 296 & 116 & 2{,}846 & 519 & 0.832 & 0.363 & 0.961 & 0.718 & 0.482 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Effect of the loss weight.} The loss weight moves the operating point but not the ranking. On the validation set
+at the default threshold of 0.5, weighted BCE raises sensitivity from 0.562 to 0.822 but lowers specificity from 0.910 to
+0.742 and precision from 0.655 to 0.486, while F1 (0.600 to 0.610) and AUROC (0.861 for both) barely change. The weight makes the model act as if positives were 3.6 times more common, raising its mean prediction from 0.245 to 0.408 without improving the ranking. So once each model gets its own validation threshold, the two perform the same on test.
+
+\textbf{Calibration.} The headline CNN ranks examinations well, but its probabilities are too high
+(Figure~\ref{fig:calibration}). Discrimination concerns only the order of the scores; calibration asks whether they can be taken literally, i.e.\ whether about 30\% of examinations given $p \approx 0.3$ are positive. On the test set the seed-2 model discriminates well (AUROC 0.862) but lies
+below the diagonal in every bin (ECE 0.195). The cause is weighted BCE: it lifts the mean prediction to 0.411 against a prevalence of 0.216, and the plain-BCE CNN's ECE is only 0.051. Platt scaling lowers the ECE to 0.011 and the Brier score
+from 0.173 to 0.114 while AUROC stays at 0.862, because a monotonic transformation cannot change the order of the scores.
+
+\begin{figure}[t]
+\centering\fig[0.78]{F5_reliability.pdf}
+\caption{\textbf{The weighted CNN over-predicts (ECE 0.195); Platt scaling fitted on validation fixes its calibration
+(ECE 0.011) and leaves its AUROC unchanged.} Test set, seed 2; hollow markers: bins with fewer than 30 examinations;
+lower strips: examinations per bin (log scale).}
+\label{fig:calibration}
+\end{figure}
+
+\textbf{Subgroups.}\label{sec:subgroups} The subgroup analysis suggests that part of the ranking comes from telling AP from
+PA images apart (Table~\ref{tab:subgroups}). AUROC is 0.824 within PA and 0.815 within AP examinations; the overall 0.862 is higher partly because the projection alone ranks examinations with an AUROC of 0.696 (AP examinations are almost four times as often positive). More directly, within each true class the score still separates AP from PA (AP-versus-PA AUROC 0.826 among negatives, 0.818 among positives), so it carries strong projection information beyond the opacity. At the screening threshold the model therefore flags nearly all AP opacities (sensitivity 0.972) but also two thirds of AP negatives (specificity 0.338), and misses a third of PA opacities (sensitivity 0.645). A deployed model would need projection-specific thresholds. AUROC also falls with age, from 0.895 below 40 years to 0.823 at 60 and
+over, but age is entangled with projection, and the sex difference lies within overlapping intervals. With small groups
+(only 200 positive PA examinations), seven comparisons, one split and one model, these findings are leads, not firm conclusions.
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{\textbf{Within each projection AUROC is lower than overall.} Headline CNN (seed 2) on the test split; 95\%
+bootstrap intervals (1{,}000 resamples); sensitivity and specificity at the screening threshold.}
+\label{tab:subgroups}
+\begin{tabular}{lrrccc}
+\toprule
+subgroup & examinations & positives (share) & AUROC [95\% interval] & sensitivity & specificity \\
+\midrule
+all test examinations & 3{,}777 & 815 (22\%) & 0.862 [0.848, 0.876] & 0.892 & 0.642 \\
+\midrule
+PA projection & 2{,}086 & 200 (10\%) & 0.824 [0.795, 0.855] & 0.645 & 0.816 \\
+AP projection & 1{,}691 & 615 (36\%) & 0.815 [0.795, 0.834] & 0.972 & 0.338 \\
+\midrule
+female & 1{,}578 & 313 (20\%) & 0.874 [0.853, 0.895] & 0.872 & 0.655 \\
+male & 2{,}199 & 502 (23\%) & 0.852 [0.835, 0.871] & 0.904 & 0.633 \\
+\midrule
+age $<$ 40 years & 1{,}218 & 289 (24\%) & 0.895 [0.875, 0.915] & 0.920 & 0.659 \\
+age 40--59 years & 1{,}626 & 319 (20\%) & 0.854 [0.832, 0.875] & 0.884 & 0.639 \\
+age $\geq$ 60 years & 933 & 207 (22\%) & 0.823 [0.793, 0.854] & 0.865 & 0.628 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Errors and Grad-CAM.} The most confident errors (Appendix Figure~\ref{fig:errors}) are a false alarm at $p = 0.99$, whose hazy lungs make its label debatable, and a miss at $p = 0.01$. The heat maps overlap the annotated opacities but also cover the heart (Figure~\ref{fig:gradcam}). Across the 815 positive
+test examinations, the boxes cover a median 9.5\% of the image but receive 17.1\% of the heat (more than their area for 76\% of them). Only 18.5\% of the heat falls in the outer 8\% band, which covers 29.6\% of the image. Both suggest the model looks at the lungs. Three observations call for caution. Negative examinations have about five times less heat,
+52\% of it in the border band where edges, text and side markers are. The average positive map is centred on the heart,
+whose apparent size differs between AP and PA images. For 10\% of positives almost no heat falls inside the boxes. Grad-CAM only shows where the score is sensitive; proving that a region is used requires changing the input, as in X2.
+
+\begin{figure}[t]
+\centering\fig[0.7]{G3_gradcam.pdf}
+\caption{\textbf{On the true positives the heat overlaps the boxes but also spreads over the heart and mediastinum; on the
+correct negatives the maps are much weaker (raw peak 0.01--0.03 versus 0.16--0.31).} Grad-CAM on \texttt{layer4} for four correct and four incorrect
+test examinations (errors titled in red). Each map is scaled to its own peak; the raw peak is printed below; white
+rectangles: annotated opacities.}
+\label{fig:gradcam}
+\end{figure}
+
+\section{Bonus questions}
+
+\textbf{X1: prevalence shift.} To isolate the effect of prevalence, we built from the test split a 10\%-prevalence set (all negatives, random positives) and a 40\% set (all positives, random negatives), and scored both with the same model and frozen screening threshold (Table~\ref{tab:x1}).
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{\textbf{Changing the prevalence moves precision and F1 but not sensitivity, specificity or AUROC.} Headline CNN
+(seed 2), frozen screening threshold; one seeded subsample per prevalence (seed 2440; SD over 500 repeated subsamples with seeds 1000--1499 $\leq$ 0.014).}
+\label{tab:x1}
+\begin{tabular}{lrrccccc}
+\toprule
+test set & $n$ & positives & sensitivity & specificity & precision (PPV) & F1 & AUROC \\
+\midrule
+10\% prevalence & 3{,}291 & 329 & 0.897 & 0.642 & 0.218 & 0.351 & 0.859 \\
+original (21.6\%) & 3{,}777 & 815 & 0.892 & 0.642 & 0.407 & 0.559 & 0.862 \\
+40\% prevalence & 2{,}037 & 815 & 0.892 & 0.639 & 0.622 & 0.733 & 0.860 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\emph{Interpretation.} As the prevalence drops from 40\% to 10\%, sensitivity, specificity and AUROC stay within
+sampling noise, while precision falls from 0.622 to 0.218 and F1 from 0.733 to 0.351. The reason lies in how each metric is
+computed. Sensitivity $=$ TP/(TP+FN) uses only positive examinations and specificity $=$ TN/(TN+FP) only negative ones. Removing examinations of one class at random leaves each class's score distribution unchanged on average, so the share of each class above the threshold stays the same. AUROC compares positive--negative pairs and is prevalence-free for
+the same reason. Precision $=$ TP/(TP+FP), in contrast, mixes the two classes: true positives grow with
+sensitivity\,$\times$\,prevalence and false positives with (1$-$specificity)\,$\times$\,(1$-$prevalence). As Bayes' rule predicts, false alarms dominate when positives are rare, and F1 falls with precision. The challenge data are enriched to 22\% positives, but in an emergency department with about 5\% prevalence the same model and
+threshold would keep their sensitivity and specificity while their precision fell to about 0.12, or eight false alarms per
+true opacity. Challenge-set precision, F1 and accuracy therefore do not transfer; the model would need local validation,
+recalibration and a threshold chosen for the local prevalence.
+
+\textbf{X2: shortcut stress test with a control.}\label{sec:x2} To test whether the model relies on the image border, we
+replaced the outer 8\% of the width and height (29.6\% of the pixels) with the training-mean grey value. As a control, we
+hid the same area inside the lung fields with two rectangles centred where training opacities are densest. For every test
+image we then computed $\Delta p = p(\text{masked}) - p(\text{original})$ (Table~\ref{tab:x2}).
+
+\begin{table}[!tb]
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{\textbf{Hiding the lung fields changes the predictions about five times more than hiding the border.} Distribution
+of $\Delta p = p(\text{masked}) - p(\text{original})$ over the 3{,}777 test images (headline CNN, seed 2; unmasked AUROC
+0.862). Both masks cover 29.6\% of the pixels. The full distributions are plotted in Appendix Figure~\ref{fig:x2}.}
+\label{tab:x2}
+\begin{tabular}{lccccc}
+\toprule
+mask & median $|\Delta p|$ & 95th pct.\ $|\Delta p|$ & share $|\Delta p| > 0.10$ & mean $\Delta p$, positives & AUROC after masking \\
+\midrule
+border (outer 8\%) & 0.045 & 0.214 & 25\% & $-0.007$ & 0.858 \\
+lung-field control & 0.237 & 0.501 & 83\% & $-0.300$ & 0.711 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\emph{Interpretation.} Masking the border barely changes the output (median $|\Delta p|$ 0.045, AUROC 0.858),
+whereas masking the same area of lung changes it about five times more (median $|\Delta p|$ 0.237, AUROC 0.711), and
+positive examinations lose 0.300 of probability on average. The border change is smaller than the control change for 83\%
+of images (paired Wilcoxon test, $P < 10^{-300}$), although 25\% of images still move by more than 0.10 (the largest three are in Appendix Figure~\ref{fig:x2cam}). The control is
+essential because covering 30\% of an image is itself unnatural, so the model might react to the grey block rather than to
+what it hides; with the same fill and area in both masks, only the location differs. We can therefore conclude that the lung fields carry much more of this model's signal than the border. We cannot conclude that the model uses no shortcuts: whole-image projection cues survive border masking, the control also hides the disease, and we tried only one mask width, fill and model. Conversely, a larger border effect would be evidence, not proof, of shortcut use: masking shows that the output depends on a region, not which content in it matters, because masked images are unlike the training data and the border also contains anatomy.
+
+\section{Discussion and limitations}
+The headline CNN ranks annotated lung opacity far better than the baselines (test AUROC 0.857 versus 0.689), beyond
+training and test-sample noise. Five caveats limit this result: the target is an annotation proxy in which ``negative'' includes abnormal images, the probabilities must be recalibrated before use, precision depends on prevalence (41\% here, about 12\% at 5\%), part of the ranking appears to come from the projection, and all results come from one hospital, one split and three seeds. Next steps are projection-specific thresholds, a lower fine-tuning learning rate ($3\times10^{-5}$ nearly matched $10^{-4}$ without overfitting) and multi-site validation.
+
+\FloatBarrier
+\medskip\noindent\textbf{Acknowledgements and AI use.} The NIH Clinical Center is acknowledged as the provider of the source chest-radiograph data \cite{wang2017}, annotated in the RSNA Pneumonia Detection Challenge \cite{rsna2018,shih2019}. Figures use the \emph{paper-figure} style code \cite{paperfigure}; AI use is disclosed in \texttt{ai\_use\_declaration.txt}.
+
+\clearpage
+\begin{thebibliography}{9}\small
+\setlength{\itemsep}{0pt}
+\bibitem{rsna2018} Radiological Society of North America. RSNA Pneumonia Detection Challenge (2018). Online dataset and
+challenge documentation, 2018. \url{https://www.rsna.org/education/ai-resources-and-training/ai-image-challenge/RSNA-Pneumonia-Detection-Challenge-2018}. Accessed 27 September 2026.
+\bibitem{shih2019} G. Shih, C. C. Wu, S. S. Halabi, M. D. Kohli, L. M. Prevedello, T. S. Cook, et al. Augmenting the
+National Institutes of Health chest radiograph dataset with expert annotations of possible pneumonia.
+\emph{Radiology: Artificial Intelligence}, 1(1):e180041, 2019. doi:10.1148/ryai.2019180041.
+\bibitem{wang2017} X. Wang, Y. Peng, L. Lu, Z. Lu, M. Bagheri, R. M. Summers. ChestX-ray8: Hospital-scale chest X-ray
+database and benchmarks on weakly-supervised classification and localization of common thorax diseases. In
+\emph{CVPR}, pages 3462--3471, 2017.
+\bibitem{deng2009} J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, L. Fei-Fei. ImageNet: A large-scale hierarchical image
+database. In \emph{CVPR}, pages 248--255, 2009.
+\bibitem{he2016} K. He, X. Zhang, S. Ren, J. Sun. Deep residual learning for image recognition. In \emph{CVPR}, pages 770--778, 2016.
+\bibitem{paszke2019} A. Paszke, S. Gross, F. Massa, et al. PyTorch: An imperative style, high-performance deep learning
+library. In \emph{Advances in Neural Information Processing Systems 32 (NeurIPS)}, pages 8024--8035, 2019. Pretrained weights: torchvision \texttt{ResNet18\_Weights.IMAGENET1K\_V1}.
+\bibitem{selvaraju2017} R. R. Selvaraju, M. Cogswell, A. Das, R. Vedantam, D. Parikh, D. Batra. Grad-CAM: Visual
+explanations from deep networks via gradient-based localization. In \emph{ICCV}, pages 618--626, 2017.
+\bibitem{paperfigure} \emph{paper-figure} figure-style skill (supplied as a Claude Code skill); its Appendix A plotting code
+is used in \texttt{helpers/paper\_plot\_style.py} with edited venue and palette constants.
+\bibitem{platt1999} J. C. Platt. Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods. In \emph{Advances in Large Margin Classifiers}, pages 61--74. MIT Press, 1999.
+\end{thebibliography}
+
+\clearpage
+\appendix
+\section*{Appendix: additional figures}
+\renewcommand{\thefigure}{A\arabic{figure}}
+\setcounter{figure}{0}
+
+\begin{center}
+\centering
+\fig[0.74]{A3_representative_images.pdf}
+\captionof{figure}{\textbf{Representative examinations, chosen by fixed rules.} Top: one negative and one positive examination per
+projection (the top-left negative image is visibly abnormal). Bottom: the positive with the smallest annotated area (0.3\%
+of the image; inset: 3$\times$ zoom), the examination with the most boxes (4), the darkest of 1{,}500 screened images (a
+6-year-old child who fills only the centre of the frame) and a header that records an age of 150 years. Gold rectangles:
+annotated opacities.}
+\label{fig:examples}
+\vspace{6pt}
+\fig[0.72]{C2_augmentation_panel.pdf}
+\captionof{figure}{\textbf{Training augmentation makes small, anatomically plausible changes.} Two positive training images before
+augmentation and after three random draws, with the sampled rotation, scale and shift under each draw. Validation and
+test images are never augmented.}
+\label{fig:augment}
+\vspace{6pt}
+\fig[0.78]{X2_delta_p.pdf}
+\captionof{figure}{\textbf{Hiding the lung fields changes the predictions about five times more than hiding the border (median
+$|\Delta p|$ 0.237 versus 0.045).} (a) Distribution of $\Delta p$ over the 3{,}777 test images (log counts). (b)
+Cumulative distribution of $|\Delta p|$; dots: medians. Headline CNN, seed 2.}
+\label{fig:x2}
+\end{center}
+
+\clearpage
+\begin{center}
+\centering
+\fig[0.8]{G1_error_examples.pdf}
+\captionof{figure}{\textbf{True and false positives and negatives; the two most confident mistakes are a false positive at $p = 0.99$
+and a missed opacity at $p = 0.01$.} Test examinations at the screening threshold ($t = 0.396$). Top: the examination at
+the median probability of its outcome group; bottom: the most confident correct call or mistake. Gold rectangles:
+annotated opacities.}
+\label{fig:errors}
+\vspace{6pt}
+\fig[0.8]{X2_gradcam_top3.pdf}
+\captionof{figure}{\textbf{The three largest changes under border masking are all increases of about 0.5, two of them on negative
+examinations.} Grad-CAM before (top) and after (bottom) border masking; each pair shares one colour scale. All three are PA
+images; after masking the heat concentrates over the heart and medial lung bases rather than on the grey frame.}
+\label{fig:x2cam}
+\end{center}
+
+\end{document}
